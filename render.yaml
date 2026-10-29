@@ -28,3 +28,8 @@ services:
       # Vercel 프론트엔드 주소 (쉼표로 여러 개 가능). 처음 Blueprint를 만들 때 입력합니다.
       - key: FRONTEND_ORIGIN
         sync: false
+      # 가상 데이터 초기화 (Level 2 데모 전용). 토큰은 Render 대시보드에서 직접 입력합니다.
+      - key: ALLOW_DEMO_RESET
+        value: "true"
+      - key: DEMO_RESET_TOKEN
+        sync: false

@@ -1,6 +1,7 @@
 // 가상 데이터 넣기 (기획서 6장 "가상 데이터")
 //   npm run seed          → DB가 비어 있을 때만 넣습니다.
-//   npm run seed -- --reset → 기존 용품·대여·소독 기록을 모두 지우고 다시 넣습니다.
+//   npm run seed -- --reset → 기존 용품·대여·소독·신청 기록을 모두 지우고 다시 넣습니다.
+// 화면의 "가상 데이터 다시 채우기"(POST /admin/reset-demo)도 같은 seedDemoData 를 씁니다.
 // 모든 이름과 연락처는 가상입니다. 연락처는 010-0000-XXXX 형태만 씁니다.
 import { ItemCategory, ItemCondition, Prisma, PrismaClient, SanitizationMethod } from '@prisma/client';
 import { addDays, toDbDate, todayInKorea } from './common/dates';
@@ -160,23 +161,34 @@ function buildHistory(seed: ItemSeed, index: number, today: string) {
   return { rentals, sanitizations };
 }
 
-async function main() {
-  const prisma = new PrismaClient();
-  const reset = process.argv.includes('--reset');
-  try {
-    const existing = await prisma.item.count();
-    if (existing > 0 && !reset) {
-      console.log(`이미 용품 ${existing}개가 있어 가상 데이터를 넣지 않았어요. 지우고 다시 넣으려면: npm run seed -- --reset`);
-      return;
-    }
+export interface SeedResult {
+  items: number;
+  rentals: number;
+  sanitizations: number;
+  requests: number;
+}
 
-    const today = todayInKorea();
-    await prisma.$transaction(async (tx) => {
-      if (reset) {
-        await tx.sanitization.deleteMany();
-        await tx.rental.deleteMany();
-        await tx.item.deleteMany();
+// 가상 신청 샘플: 신청 중 2건(하나는 3일 전), 취소됨 1건, 대여 처리됨 1건(진행 중인 대여 기록과 연결)
+const REQUEST_SAMPLES = {
+  pending: [
+    { code: 'MOV-001', guardianName: '오수아', guardianPhone: '010-0000-2101', childAgeMonths: 8, durationDays: 14, daysAgo: 3 },
+    { code: 'SLP-001', guardianName: '서은우', guardianPhone: '010-0000-2102', childAgeMonths: 4, durationDays: 7, daysAgo: 0 },
+  ],
+  cancelled: { code: 'FED-001', guardianName: '안채원', guardianPhone: '010-0000-2103', childAgeMonths: 10, durationDays: 10, daysAgo: 2 },
+  approved: { code: 'MOV-004' }, // 이 용품의 진행 중인 대여 기록과 같은 보호자·기간
+};
+
+// 가상 데이터를 한 트랜잭션으로 넣습니다. reset 이면 기존 기록을 모두 지우고(번호도 처음부터) 다시 넣고,
+// 도중에 오류가 나면 전부 되돌려 기존 데이터가 그대로 남습니다.
+export async function seedDemoData(prisma: PrismaClient, options: { reset: boolean }): Promise<SeedResult> {
+  const today = todayInKorea();
+  await prisma.$transaction(
+    async (tx) => {
+      if (options.reset) {
+        // 자식 테이블을 모두 함께 비우고 id 번호를 1부터 다시 매깁니다 (트랜잭션 안이라 실패하면 되돌려짐).
+        await tx.$executeRawUnsafe('TRUNCATE TABLE rental_requests, rentals, sanitizations, items RESTART IDENTITY');
       }
+      const itemIdByCode = new Map<string, number>();
       for (const [index, seed] of ITEMS.entries()) {
         const condition: ItemCondition = seed.final === 'REPAIR' ? 'NEEDS_REPAIR' : index % 4 === 1 ? 'FAIR' : 'GOOD';
         const item = await tx.item.create({
@@ -194,24 +206,91 @@ async function main() {
             imageUrl: `/items/${PRODUCTS[seed.code][3]}.svg`,
           },
         });
+        itemIdByCode.set(seed.code, item.id);
         const { rentals, sanitizations } = buildHistory(seed, index, today);
         await tx.rental.createMany({ data: rentals.map((r) => ({ ...r, itemId: item.id })) });
         await tx.sanitization.createMany({ data: sanitizations.map((s) => ({ ...s, itemId: item.id })) });
       }
-    }, { timeout: 60_000 });
 
-    const [items, rentals, sanitizations] = await Promise.all([
-      prisma.item.count(),
-      prisma.rental.count(),
-      prisma.sanitization.count(),
-    ]);
-    console.log(`가상 데이터를 넣었어요: 용품 ${items}개, 대여 기록 ${rentals}개, 소독 기록 ${sanitizations}개`);
+      // 신청 샘플
+      const idOf = (code: string) => itemIdByCode.get(code)!;
+      for (const sample of REQUEST_SAMPLES.pending) {
+        await tx.rentalRequest.create({
+          data: {
+            itemId: idOf(sample.code),
+            guardianName: sample.guardianName,
+            guardianPhone: sample.guardianPhone,
+            childAgeMonths: sample.childAgeMonths,
+            durationDays: sample.durationDays,
+            createdAt: sample.daysAgo === 0 ? new Date() : at(addDays(today, -sample.daysAgo), 10),
+          },
+        });
+      }
+      const cancelled = REQUEST_SAMPLES.cancelled;
+      await tx.rentalRequest.create({
+        data: {
+          itemId: idOf(cancelled.code),
+          guardianName: cancelled.guardianName,
+          guardianPhone: cancelled.guardianPhone,
+          childAgeMonths: cancelled.childAgeMonths,
+          durationDays: cancelled.durationDays,
+          status: 'CANCELLED',
+          createdAt: at(addDays(today, -cancelled.daysAgo), 11),
+          cancelledAt: at(addDays(today, -1), 15),
+        },
+      });
+      const activeRental = await tx.rental.findFirstOrThrow({
+        where: { itemId: idOf(REQUEST_SAMPLES.approved.code), returnedAt: null },
+      });
+      const keptDays = Math.round((activeRental.dueDate.getTime() - activeRental.rentedAt.getTime()) / 86_400_000);
+      await tx.rentalRequest.create({
+        data: {
+          itemId: activeRental.itemId,
+          guardianName: activeRental.guardianName,
+          guardianPhone: activeRental.guardianPhone,
+          childAgeMonths: activeRental.childAgeMonths,
+          durationDays: keptDays,
+          status: 'APPROVED',
+          rentalId: activeRental.id,
+          createdAt: activeRental.createdAt,
+          approvedAt: activeRental.createdAt,
+        },
+      });
+    },
+    { timeout: 60_000 },
+  );
+
+  const [items, rentals, sanitizations, requests] = await Promise.all([
+    prisma.item.count(),
+    prisma.rental.count(),
+    prisma.sanitization.count(),
+    prisma.rentalRequest.count(),
+  ]);
+  return { items, rentals, sanitizations, requests };
+}
+
+async function main() {
+  const prisma = new PrismaClient();
+  const reset = process.argv.includes('--reset');
+  try {
+    const existing = await prisma.item.count();
+    if (existing > 0 && !reset) {
+      console.log(`이미 용품 ${existing}개가 있어 가상 데이터를 넣지 않았어요. 지우고 다시 넣으려면: npm run seed -- --reset`);
+      return;
+    }
+    const result = await seedDemoData(prisma, { reset });
+    console.log(
+      `가상 데이터를 넣었어요: 용품 ${result.items}개, 대여 기록 ${result.rentals}개, 소독 기록 ${result.sanitizations}개, 신청 ${result.requests}건`,
+    );
   } finally {
     await prisma.$disconnect();
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// `npm run seed` 로 직접 실행할 때만 돌리고, 서버가 이 파일을 불러올 때는 돌리지 않습니다.
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
