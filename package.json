@@ -1,0 +1,34 @@
+{
+  "name": "baby-rental-level2-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "햇빛구 육아용품 대여실 관리 웹앱 백엔드 (NestJS)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "node --env-file-if-exists=.env dist/main",
+    "start:dev": "nest start --watch --env-file .env",
+    "start:render": "prisma migrate deploy && node dist/main",
+    "prisma:generate": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "seed": "nest build && node --env-file-if-exists=.env dist/seed"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.2.8",
+    "@nestjs/core": "^11.2.8",
+    "@nestjs/platform-express": "^11.2.8",
+    "@prisma/client": "^6.19.3",
+    "prisma": "^6.19.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  }
+}

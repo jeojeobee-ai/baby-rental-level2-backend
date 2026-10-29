@@ -1,0 +1,14 @@
+# 의존성·빌드 결과
+node_modules/
+dist/
+
+# 비밀값이 들어 있는 환경변수 파일 (예시 파일만 올립니다)
+.env
+.env.*
+!.env.example
+
+# 기타
+*.log
+*.tmp.js
+.DS_Store
+Thumbs.db

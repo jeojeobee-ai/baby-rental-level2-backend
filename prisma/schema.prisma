@@ -1,0 +1,99 @@
+// 기획서.md 6장 "데이터 설계"를 그대로 옮긴 스키마입니다.
+// 테이블과 칸 이름은 기획서와 같게 snake_case로 저장합니다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 분류: 이동 / 수면 / 수유·위생 / 놀이·발달
+enum ItemCategory {
+  MOBILITY
+  SLEEP
+  FEEDING
+  PLAY
+}
+
+// 용품 상태 (물리적 상태): 좋음 / 사용감 있음 / 수리 필요
+enum ItemCondition {
+  GOOD
+  FAIR
+  NEEDS_REPAIR
+}
+
+// 소독 방법: 스팀 / 자외선 / 세제 세척
+enum SanitizationMethod {
+  STEAM
+  UV
+  WASH
+}
+
+// 소독 결과: 소독 완료 / 소독 미완료
+enum SanitizationResult {
+  PASS
+  FAIL
+}
+
+// 테이블 ① 용품
+model Item {
+  id           Int           @id @default(autoincrement())
+  code         String        @unique @db.VarChar(7)
+  name         String        @db.VarChar(30)
+  category     ItemCategory
+  minAgeMonths Int           @map("min_age_months")
+  maxAgeMonths Int           @map("max_age_months")
+  condition    ItemCondition
+  memo         String?       @db.VarChar(200)
+  // 제품 정보 (모두 선택 입력, 가상 데이터)
+  brand        String?       @db.VarChar(30)
+  modelName    String?       @map("model_name") @db.VarChar(40)
+  purchasedAt  DateTime?     @map("purchased_at") @db.Date
+  imageUrl     String?       @map("image_url") @db.VarChar(100)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  rentals       Rental[]
+  sanitizations Sanitization[]
+
+  @@map("items")
+}
+
+// 테이블 ② 대여 기록 (용품 1 : N 대여 기록)
+model Rental {
+  id             Int       @id @default(autoincrement())
+  itemId         Int       @map("item_id")
+  guardianName   String    @map("guardian_name") @db.VarChar(20)
+  guardianPhone  String    @map("guardian_phone") @db.VarChar(13)
+  childAgeMonths Int       @map("child_age_months")
+  rentedAt       DateTime  @map("rented_at") @db.Date
+  dueDate        DateTime  @map("due_date") @db.Date
+  returnedAt     DateTime? @map("returned_at") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  // 기록이 있는 용품은 지우지 않으므로 삭제를 막아 둡니다.
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@map("rentals")
+}
+
+// 테이블 ③ 소독 기록 (용품 1 : N 소독 기록)
+model Sanitization {
+  id          Int                @id @default(autoincrement())
+  itemId      Int                @map("item_id")
+  sanitizedAt DateTime           @map("sanitized_at") @db.Date
+  staffName   String             @map("staff_name") @db.VarChar(20)
+  method      SanitizationMethod
+  result      SanitizationResult
+  memo        String?            @db.VarChar(200)
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@map("sanitizations")
+}
