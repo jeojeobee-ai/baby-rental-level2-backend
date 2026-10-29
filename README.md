@@ -5,7 +5,7 @@ Level 1(용품·대여·소독 기록)에 **대여 신청·취소·대여 처리
 
 - 기획서: [기획서.md](./기획서.md)
 - 프론트엔드 저장소: https://github.com/jeojeobee-ai/baby-rental-level2-frontend
-- 배포 주소: 아직 없음 (배포 뒤 이 줄에 적습니다)
+- 배포 주소: https://baby-rental-level2-api.onrender.com (`/health`로 확인)
 
 > **무료 서버 안내** — 이 백엔드는 Render 무료 서버에 올립니다. 15분 동안 요청이 없으면 서버가 잠들고, 그 뒤 첫 접속은 **1분쯤 걸릴 수 있습니다.** 화면이 비어 보이면 잠시 기다렸다가 새로고침해 주세요.
 
