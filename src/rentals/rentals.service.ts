@@ -3,9 +3,9 @@ import { daysBetween, isValidDate, toDbDate, todayInKorea } from '../common/date
 import { FORM_ERROR, FieldErrors, asBody, intInRange, text } from '../common/validation';
 import { ItemsService, serializeRental } from '../items/items.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ageRangeMessage, itemBlockMessage } from '../requests/rules';
 
 export const RENTAL_NOT_FOUND = '찾는 대여 기록이 없어요';
-const ALREADY_RENTED = '이미 대여 중인 용품이에요. 반납 처리를 한 뒤 대여 기록을 남겨 주세요.';
 
 const PHONE_PATTERN = /^010-\d{4}-\d{4}$/;
 const MAX_RENTAL_DAYS = 30;
@@ -25,10 +25,11 @@ export class RentalsService {
     const errors = new FieldErrors();
     const today = todayInKorea();
 
-    // 반납 안 된 대여가 남아 있으면 같은 용품을 또 빌려줄 수 없습니다.
-    if (item.rentals.some((rental) => rental.returnedAt === null)) {
-      errors.add(FORM_ERROR, ALREADY_RENTED);
-    }
+    // R6·R1: 신청 중인 건이 있거나, 지금 상태가 대여 가능이 아니면 직접 대여 기록을 남길 수 없습니다.
+    // (반납 안 된 대여가 남아 있으면 "대여 중"이므로 Level 1의 중복 대여 차단도 여기에 포함됩니다.)
+    const pendingCount = await this.prisma.rentalRequest.count({ where: { itemId, status: 'PENDING' } });
+    const blocked = itemBlockMessage(item, pendingCount, 'direct');
+    if (blocked) errors.add(FORM_ERROR, blocked);
 
     const guardianName = text(body.guardianName);
     if (guardianName.length < 2 || guardianName.length > 20) {
@@ -43,6 +44,10 @@ export class RentalsService {
     const childAgeMonths = intInRange(body.childAgeMonths, 0, 72);
     if (childAgeMonths === null) {
       errors.add('childAgeMonths', '아기 월령은 0부터 72 사이 숫자로 적어 주세요.');
+    } else {
+      // R2: 용품의 사용 월령 범위 안이어야 합니다.
+      const ageMessage = ageRangeMessage(item, childAgeMonths);
+      if (ageMessage) errors.add('childAgeMonths', ageMessage);
     }
 
     const rentedAt = body.rentedAt;
@@ -65,10 +70,15 @@ export class RentalsService {
     // 저장 버튼을 두 번 누르는 등 동시에 들어온 요청도 한 건만 저장되도록 용품 줄을 잠근 뒤 다시 확인합니다.
     const rental = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM items WHERE id = ${itemId} FOR UPDATE`;
-      const active = await tx.rental.count({ where: { itemId, returnedAt: null } });
-      if (active > 0) {
+      const fresh = await tx.item.findUniqueOrThrow({
+        where: { id: itemId },
+        include: { rentals: true, sanitizations: true },
+      });
+      const pending = await tx.rentalRequest.count({ where: { itemId, status: 'PENDING' } });
+      const again = itemBlockMessage(fresh, pending, 'direct');
+      if (again) {
         const conflict = new FieldErrors();
-        conflict.add(FORM_ERROR, ALREADY_RENTED);
+        conflict.add(FORM_ERROR, again);
         conflict.throwIfAny();
       }
       return tx.rental.create({

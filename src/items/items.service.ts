@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Item, Prisma, Rental, Sanitization } from '@prisma/client';
+import { Item, Prisma, Rental, RentalRequest, Sanitization } from '@prisma/client';
 import { fromDbDate, isValidDate, toDbDate, todayInKorea } from '../common/dates';
 import { FieldErrors, asBody, intInRange, oneOf, optionalText, text } from '../common/validation';
 import { PrismaService } from '../prisma/prisma.service';
+import { serializeRequest } from '../requests/serialize';
 import { ITEM_IMAGES } from './item-images';
 import { computeItemStatus } from './item-status';
 
@@ -19,7 +20,11 @@ const CODE_PREFIX: Record<(typeof CATEGORIES)[number], { prefix: string; label: 
   PLAY: { prefix: 'PLY', label: '놀이·발달' },
 };
 
-type ItemWithRecords = Item & { rentals: Rental[]; sanitizations: Sanitization[] };
+type ItemWithRecords = Item & {
+  rentals: Rental[];
+  sanitizations: Sanitization[];
+  requests: Pick<RentalRequest, 'id'>[]; // 신청 중(PENDING)인 건만
+};
 
 // 최신순: 날짜가 늦은 것 먼저, 같은 날이면 나중에 기록한 것 먼저
 const newestRentalsFirst: Prisma.RentalOrderByWithRelationInput[] = [
@@ -77,6 +82,7 @@ function serializeItem(item: ItemWithRecords) {
     updatedAt: item.updatedAt,
     status: computeItemStatus(item.condition, item.rentals, item.sanitizations),
     lastSanitizedAt: latestSanitization ? fromDbDate(latestSanitization.sanitizedAt) : null,
+    hasPendingRequest: item.requests.length > 0,
   };
 }
 
@@ -91,6 +97,7 @@ export class ItemsService {
       include: {
         rentals: { orderBy: newestRentalsFirst },
         sanitizations: { orderBy: newestSanitizationsFirst },
+        requests: { where: { status: 'PENDING' }, select: { id: true } },
       },
     });
     return items.map(serializeItem);
@@ -103,13 +110,15 @@ export class ItemsService {
       include: {
         rentals: { orderBy: newestRentalsFirst },
         sanitizations: { orderBy: newestSanitizationsFirst },
+        requests: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] },
       },
     });
     if (!item) throw new NotFoundException({ message: ITEM_NOT_FOUND });
     return {
-      ...serializeItem(item),
+      ...serializeItem({ ...item, requests: item.requests.filter((request) => request.status === 'PENDING') }),
       rentals: item.rentals.map(serializeRental),
       sanitizations: item.sanitizations.map(serializeSanitization),
+      requests: item.requests.map((request) => serializeRequest(request)),
     };
   }
 
@@ -198,7 +207,10 @@ export class ItemsService {
 
   // 대여·소독 기록을 남기기 전에 용품이 있는지 확인합니다.
   async getWithRentalsOr404(id: number) {
-    const item = await this.prisma.item.findUnique({ where: { id }, include: { rentals: true } });
+    const item = await this.prisma.item.findUnique({
+      where: { id },
+      include: { rentals: true, sanitizations: true },
+    });
     if (!item) throw new NotFoundException({ message: ITEM_NOT_FOUND });
     return item;
   }

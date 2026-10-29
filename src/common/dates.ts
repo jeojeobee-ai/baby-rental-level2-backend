@@ -10,13 +10,17 @@ export function isValidDate(value: unknown): value is string {
 }
 
 // 센터가 한국에 있으므로 "오늘"은 한국 시간 기준입니다.
-export function todayInKorea(): string {
+export function dateInKorea(value: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(value);
+}
+
+export function todayInKorea(): string {
+  return dateInKorea(new Date());
 }
 
 export function toDbDate(value: string): Date {

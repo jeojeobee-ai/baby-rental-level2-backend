@@ -5,12 +5,14 @@ import { ItemsService } from './items/items.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { RentalsController } from './rentals/rentals.controller';
 import { RentalsService } from './rentals/rentals.service';
+import { RequestsController } from './requests/requests.controller';
+import { RequestsService } from './requests/requests.service';
 import { SanitizationsController } from './sanitizations/sanitizations.controller';
 import { SanitizationsService } from './sanitizations/sanitizations.service';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [HealthController, ItemsController, RentalsController, SanitizationsController],
-  providers: [ItemsService, RentalsService, SanitizationsService],
+  controllers: [HealthController, ItemsController, RentalsController, RequestsController, SanitizationsController],
+  providers: [ItemsService, RentalsService, RequestsService, SanitizationsService],
 })
 export class AppModule {}

@@ -38,6 +38,13 @@ enum SanitizationResult {
   FAIL
 }
 
+// 대여 신청 상태: 신청 중 / 대여 처리 완료 / 신청 취소
+enum RentalRequestStatus {
+  PENDING
+  APPROVED
+  CANCELLED
+}
+
 // 테이블 ① 용품
 model Item {
   id           Int           @id @default(autoincrement())
@@ -58,6 +65,7 @@ model Item {
 
   rentals       Rental[]
   sanitizations Sanitization[]
+  requests      RentalRequest[]
 
   @@map("items")
 }
@@ -76,6 +84,8 @@ model Rental {
 
   // 기록이 있는 용품은 지우지 않으므로 삭제를 막아 둡니다.
   item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  // 신청을 대여 처리해서 만든 대여 기록이면 그 신청 (직접 등록한 대여는 비어 있음)
+  request RentalRequest?
 
   @@index([itemId])
   @@map("rentals")
@@ -96,4 +106,27 @@ model Sanitization {
 
   @@index([itemId])
   @@map("sanitizations")
+}
+
+// 테이블 ④ 대여 신청 (용품 1 : N 신청). Level 2에서 추가.
+// "용품당 신청 중(PENDING) 1건"은 마이그레이션 SQL의 부분 고유 인덱스
+// (rental_requests_one_pending_per_item)로도 보장합니다. Prisma 스키마로는 표현할 수 없습니다.
+model RentalRequest {
+  id             Int                 @id @default(autoincrement())
+  itemId         Int                 @map("item_id")
+  guardianName   String              @map("guardian_name") @db.VarChar(20)
+  guardianPhone  String              @map("guardian_phone") @db.VarChar(13)
+  childAgeMonths Int                 @map("child_age_months")
+  durationDays   Int                 @map("duration_days")
+  status         RentalRequestStatus @default(PENDING)
+  approvedAt     DateTime?           @map("approved_at")
+  cancelledAt    DateTime?           @map("cancelled_at")
+  rentalId       Int?                @unique @map("rental_id")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  item   Item    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  rental Rental? @relation(fields: [rentalId], references: [id], onDelete: Restrict)
+
+  @@index([itemId])
+  @@map("rental_requests")
 }
